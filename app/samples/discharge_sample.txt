@@ -1,0 +1,19 @@
+CITY CARE HOSPITAL  (SAMPLE DOCUMENT - FICTIONAL PATIENT)
+DISCHARGE SUMMARY
+
+Patient: Ramesh Kumar    Age/Sex: 62 / M
+Admission: 28-Oct-2026    Discharge: 04-Nov-2026
+Diagnosis: Type 2 diabetes mellitus with urinary tract infection; hypertension
+
+Hospital course: Admitted with fever and burning urination. Treated with IV antibiotics. Blood sugar brought under control. Vitals stable at discharge.
+
+Medications at discharge:
+1. Tab Metformin 500 mg - one tablet twice daily after meals (morning and night) - 30 days
+2. Tab Amlodipine 5 mg - one tablet once daily in the morning - 30 days
+3. Tab Cefixime 200 mg - one tablet twice daily after food - 5 days
+4. Tab Pantoprazole 40 mg - one tablet once daily before breakfast - 10 days
+
+Diet: Low sugar, low salt. Avoid sweets and fried food. Drink 2 to 3 litres of water daily unless advised otherwise.
+Activity: Light walking for 20 minutes daily. Avoid heavy lifting for 2 weeks.
+Follow-up: Review at Medicine OPD on 11-Nov-2026 with fasting blood sugar report.
+Return to hospital immediately if: fever above 101 F, burning urine with blood, severe vomiting, blood sugar below 70 or above 300, chest pain, swelling of legs, or breathlessness.

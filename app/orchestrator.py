@@ -1,0 +1,94 @@
+"""Orchestrator: works out what the person wants and hands it to the right agent.
+
+Routing is keyword-based on purpose. It is instant, free and predictable, which matters
+in a voice loop. It understands English, Hinglish (Latin script) and Devanagari.
+"""
+from .agents import caregiver, checkin, explainer, handoff, schedule
+from .trace import Trace
+
+KEYWORDS: dict[str, list[str]] = {
+    "took_dose": ["le li", "le liya", "kha li", "kha liya", "taken", "i took", "took it", "ले ली", "खा ली", "ले लिया", "खा लिया"],
+    "insurance": ["insurance", "claim", "bima", "reject", "cashless", "tpa", "बीमा", "क्लेम"],
+    "family": ["family", "ghar wale", "ghar walon", "parivar", "relatives", "परिवार", "घर वालों", "घरवालों"],
+    "symptoms": ["fever", "bukhar", "vomit", "ulti", "chest", "seene", "saans", "breath", "swelling", "soojan",
+                 "sugar", "urine", "peshab", "chakkar", "dizzy", "tabiyat", "feeling", "dard", "pain",
+                 "तबीयत", "बुखार", "उल्टी", "सीने", "सांस", "साँस", "सूजन", "शुगर", "पेशाब", "चक्कर", "दर्द"],
+    "next_dose": ["next", "agli", "agla", "अगली", "अगला", "kaun si", "kaun sa", "कौन सी", "कौन सा", "kab leni",
+                  "kab lena", "कब लेनी", "कब लेना", "abhi", "now", "aaj", "kal", "आज", "कल", "due"],
+    "schedule": ["schedule", "timetable", "time table", "all medicines", "poora", "sab dawai", "routine",
+                 "kitne baje", "सारी", "सभी दवाइयां", "समय सारणी", "कितने बजे"],
+    "diet": ["diet", "eat", "food", "khana", "khane", "parhez", "avoid", "walk", "activity", "exercise",
+             "परहेज", "खाना", "खाने"],
+    "followup": ["follow", "appointment", "dobara", "kab dikhana", "review", "next visit", "opd", "दिखाना", "अपॉइंटमेंट"],
+    "explain": ["explain", "samjha", "samjhao", "kya hua", "bimari", "diagnosis", "summary", "what happened",
+                "समझा", "बीमारी", "क्या हुआ"],
+}
+WEAK = {"next_dose": ["goli", "dawai", "dawa", "medicine", "tablet", "गोली", "दवा", "दवाई"]}
+GATED = {"schedule", "next_dose", "took_dose"}
+
+
+def classify(text: str) -> str:
+    low = text.lower()
+    best, best_score = "unknown", 0
+    for intent, words in KEYWORDS.items():
+        score = sum(2 for w in words if w in low) + sum(1 for w in WEAK.get(intent, []) if w in low)
+        if score > best_score:  # earlier intents win ties
+            best, best_score = intent, score
+    return best
+
+
+async def handle(session: dict, text: str, lang: str, now: str, trace: Trace) -> dict:
+    with trace.step("orchestrator", "Understanding the request") as s:
+        intent = classify(text)
+        s.detail = f"intent: {intent}"
+
+    data = session["data"]
+    sched = session["schedule"]
+    ctx: dict = {"data": data, "schedule": sched}
+    extra: dict = {}
+
+    if intent in GATED and session["pending"]:
+        trace.note("verifier", "Held back until flagged items are confirmed", f"{len(session['pending'])} pending", "warn")
+        intent = "gated"
+    elif intent == "next_dose":
+        with trace.step("schedule", "Finding the next dose") as s:
+            ctx["slot"], ctx["tomorrow"] = schedule.next_slot(sched, now)
+            s.detail = f"{ctx['slot']['label']} {ctx['slot']['time']}" if ctx["slot"] else "no schedule"
+    elif intent == "took_dose":
+        with trace.step("schedule", "Logging the dose as taken") as s:
+            slot = schedule.current_slot(sched, now)
+            ctx["slot"] = slot
+            if slot:
+                session["adherence"][slot["key"]] = True
+                s.detail = f"{slot['label']} marked taken"
+                extra["adherence"] = session["adherence"]
+    elif intent == "symptoms":
+        with trace.step("check-in", "Comparing with the doctor's warning signs") as s:
+            ctx["matched"] = checkin.evaluate(text, data.warning_signs)
+            s.detail = f"{len(ctx['matched'])} possible match" + ("es" if len(ctx["matched"]) != 1 else "")
+        if ctx["matched"]:
+            session["alert"] = ctx["matched"][0]
+            extra["alert"] = True
+            with trace.step("caregiver", "Alerting the family") as s:
+                s.detail = "alert added to the family update"
+    elif intent == "family":
+        with trace.step("caregiver", "Writing the family update") as s:
+            nxt, _ = schedule.next_slot(sched, now)
+            label = f"{nxt['label']} {nxt['time']}" if nxt else "none"
+            ctx["family_en"], ctx["family_hi"] = caregiver.compose(session, label)
+            s.detail = "update ready"
+    elif intent == "insurance":
+        with trace.step("hand-off", "Passing details to the claim agent (Insurithm AI)") as s:
+            sent, body = await handoff.send(data)
+            ctx["insurance_en"], ctx["insurance_hi"] = handoff.compose(sent)
+            extra["handoff"] = body
+            s.detail = "sent" if sent else "prepared, not sent (INSURITHM_URL not set)"
+
+    with trace.step("explainer", "Writing the reply in plain words") as s:
+        en, hi = explainer.compose(intent, ctx)
+        reply, note = await explainer.localize(en, hi, lang)
+        s.detail = lang
+        if note:
+            extra["note"] = note
+
+    return {"intent": intent, "reply": reply, **extra}

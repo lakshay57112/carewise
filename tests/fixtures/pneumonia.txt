@@ -1,0 +1,11 @@
+GREEN VALLEY HOSPITAL (SAMPLE DOCUMENT - FICTIONAL PATIENT)
+DISCHARGE SUMMARY
+Patient: Sunita Devi    Age/Sex: 48 / F
+Diagnosis: Community acquired pneumonia
+Medications:
+1. Tab Azithromycin 500 mg - once daily after food - 3 days
+2. Tab Cetirizine 10 mg - once daily at night - 5 days
+3. Tab Paracetamol 650 mg - TDS if fever - 3 days
+Diet: Warm fluids. Light home-cooked food.
+Follow-up: OPD on 12/11/2026 with chest X-ray.
+Return to hospital if: fever above 102 F, difficulty breathing, bluish lips.

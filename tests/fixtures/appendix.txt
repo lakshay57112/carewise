@@ -1,0 +1,10 @@
+LAKE VIEW HOSPITAL (SAMPLE DOCUMENT - FICTIONAL PATIENT)
+DISCHARGE SUMMARY
+Patient: Imran Khan    Age/Sex: 35 / M
+Diagnosis: Acute appendicitis, after appendix surgery
+Medications:
+1. Tab Ibuprofen 400 mg - BD after meals - 1 week
+2. Cap Omeprazole 20 mg - OD before breakfast - 2 weeks
+Activity: No heavy lifting for 4 weeks.
+Follow-up: Surgery OPD on 15-Nov-2026 for stitch removal.
+Return to hospital immediately if: fever, pus from the wound, severe abdominal pain, or vomiting.

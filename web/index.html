@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Carewise</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap top-row">
+    <a class="brand" href="/" aria-label="Carewise home"><span class="brand-dot"></span>carewise</a>
+    <div class="top-right">
+      <span class="pill" id="pill-voice" title="Gnani Prisma and Timbre">voice</span>
+      <span class="pill" id="pill-reader" title="How the document is read">reader</span>
+      <button class="icon-btn" id="theme" aria-label="Switch light and dark">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3v18" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap layout">
+  <div class="col-main">
+    <section class="hero" id="hero">
+      <h1>Understand your<br>discharge summary.</h1>
+      <p class="lead">Paste it or snap a photo. Then just talk, in your own language.</p>
+    </section>
+
+    <section class="block" id="s-upload">
+      <div class="block-head"><span class="num">01</span><h2>Your summary</h2></div>
+      <textarea id="text" rows="7" placeholder="Paste the text of the discharge summary here"></textarea>
+      <div class="row">
+        <button class="btn primary" id="read">Read it</button>
+        <label class="btn ghost" for="photo">Upload a photo</label>
+        <input type="file" id="photo" accept="image/*" hidden>
+        <button class="btn link" id="sample">Use the sample</button>
+        <span class="file-name" id="file-name"></span>
+      </div>
+      <p class="hint" id="read-hint"></p>
+    </section>
+
+    <section class="block" id="s-check" hidden>
+      <div class="block-head"><span class="num">02</span><h2>What I understood</h2><span class="conf" id="conf"></span></div>
+      <div class="facts" id="facts"></div>
+      <div class="table-wrap"><table class="meds" id="meds"></table></div>
+      <div id="flags-box" hidden>
+        <div class="flags-head">
+          <h3>Please confirm</h3>
+          <button class="btn small ghost" id="confirm-all">Confirm all</button>
+        </div>
+        <ul class="flags" id="flags"></ul>
+      </div>
+    </section>
+
+    <section class="block" id="s-schedule" hidden>
+      <div class="block-head"><span class="num">03</span><h2>Your day</h2></div>
+      <p class="hint" id="lock-hint" hidden>Confirm the items above to unlock your timetable.</p>
+      <ol class="timeline" id="timeline"></ol>
+    </section>
+
+    <section class="block" id="s-ask" hidden>
+      <div class="block-head">
+        <span class="num">04</span><h2>Ask</h2>
+        <select id="lang" aria-label="Language"></select>
+      </div>
+      <div class="ask">
+        <button class="mic" id="mic" aria-label="Hold to talk" title="Tap to talk, tap again to send">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+        </button>
+        <div class="ask-side">
+          <div class="mic-label" id="mic-label">Tap and speak</div>
+          <form class="type" id="type">
+            <input id="q" type="text" placeholder="or type here" autocomplete="off">
+            <button class="btn small primary" type="submit">Send</button>
+          </form>
+        </div>
+      </div>
+      <div class="chips" id="chips"></div>
+      <div class="reply" id="reply" hidden>
+        <div class="said" id="said"></div>
+        <p class="reply-text" id="reply-text"></p>
+        <div class="reply-actions">
+          <button class="btn small ghost" id="replay" hidden>Play again</button>
+          <span class="note" id="reply-note"></span>
+        </div>
+      </div>
+    </section>
+
+    <footer class="foot">
+      Carewise explains your discharge summary in plain words. It is not medical advice and never changes a dose.
+      Always confirm with your doctor. Built with Gnani Prisma and Timbre.
+    </footer>
+  </div>
+
+  <aside class="col-trace">
+    <div class="trace-card">
+      <div class="trace-head"><span>Agents</span><span class="trace-total" id="trace-total"></span></div>
+      <ol class="trace" id="trace"><li class="trace-empty">Nothing yet. Agents appear here as they work.</li></ol>
+    </div>
+  </aside>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<audio id="player" hidden></audio>
+<script src="/static/app.js"></script>
+</body>
+</html>
