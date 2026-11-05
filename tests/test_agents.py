@@ -95,3 +95,16 @@ def test_gate_blocks_schedule_until_confirmed():
     c.post("/api/confirm", json={"session_id": sid["session_id"]})
     r = c.post("/api/ask", data={"session_id": sid["session_id"], "text": "next medicine", "language": "en-IN"})
     assert r.json()["intent"] == "next_dose"
+
+
+def test_quick_question_works_in_any_language():
+    c = TestClient(app)
+    sid = c.post("/api/document", data={"text": SAMPLE}).json()["session_id"]
+    # A Tamil chip: no keyword in the text could match, so the intent has to be sent directly.
+    r = c.post("/api/ask", data={"session_id": sid, "text": "எனக்கு காய்ச்சல் உள்ளது", "language": "ta-IN",
+                                  "now": "09:00", "intent": "symptoms", "hint": "I have a fever"})
+    body = r.json()
+    assert body["intent"] == "symptoms" and body["alert"] is True
+    # Without the hint or a model, the same Tamil text is not guessed at: it shows the help menu.
+    r = c.post("/api/ask", data={"session_id": sid, "text": "எனக்கு காய்ச்சல் உள்ளது", "language": "en-IN", "now": "09:00"})
+    assert r.json()["intent"] == "unknown"

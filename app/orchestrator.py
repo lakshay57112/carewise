@@ -3,6 +3,7 @@
 Routing is keyword-based on purpose. It is instant, free and predictable, which matters
 in a voice loop. It understands English, Hinglish (Latin script) and Devanagari.
 """
+from . import llm
 from .agents import caregiver, checkin, explainer, handoff, schedule
 from .trace import Trace
 
@@ -37,10 +38,37 @@ def classify(text: str) -> str:
     return best
 
 
-async def handle(session: dict, text: str, lang: str, now: str, trace: Trace) -> dict:
+INTENTS = set(KEYWORDS) | {"unknown"}
+
+
+async def classify_llm(text: str) -> tuple[str, str]:
+    """For languages the keyword lists don't cover. Returns (intent, english_gist)."""
+    prompt = (
+        "A patient wrote or said this in an Indian language. Pick the one label that fits best from: "
+        f"{', '.join(sorted(INTENTS))}. Also give a short English translation. "
+        'Reply as JSON: {"intent": "...", "english": "..."}.\n\n' + text
+    )
+    data = llm.parse_json(await llm.generate(prompt, json_mode=True))
+    label = str(data.get("intent", "unknown"))
+    return (label if label in INTENTS else "unknown"), str(data.get("english", ""))
+
+
+async def handle(session: dict, text: str, lang: str, now: str, trace: Trace,
+                 forced: str = "", hint: str = "") -> dict:
+    english = hint  # an English version of what was said, used for symptom matching
     with trace.step("orchestrator", "Understanding the request") as s:
-        intent = classify(text)
-        s.detail = f"intent: {intent}"
+        if forced in INTENTS and forced != "unknown":
+            intent = forced
+            s.detail = f"intent: {intent} (quick question)"
+        else:
+            intent = classify(text)
+            s.detail = f"intent: {intent}"
+            if intent == "unknown" and llm.enabled():
+                try:
+                    intent, english = await classify_llm(text)
+                    s.detail = f"intent: {intent} (read by model)"
+                except Exception:
+                    pass  # stay on 'unknown': it shows the help menu, which is safe
 
     data = session["data"]
     sched = session["schedule"]
@@ -64,7 +92,7 @@ async def handle(session: dict, text: str, lang: str, now: str, trace: Trace) ->
                 extra["adherence"] = session["adherence"]
     elif intent == "symptoms":
         with trace.step("check-in", "Comparing with the doctor's warning signs") as s:
-            ctx["matched"] = checkin.evaluate(text, data.warning_signs)
+            ctx["matched"] = checkin.evaluate(f"{text} {english}", data.warning_signs)
             s.detail = f"{len(ctx['matched'])} possible match" + ("es" if len(ctx["matched"]) != 1 else "")
         if ctx["matched"]:
             session["alert"] = ctx["matched"][0]

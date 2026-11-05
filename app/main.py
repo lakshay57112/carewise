@@ -120,6 +120,8 @@ async def ask(
     text: str = Form(""),
     audio: UploadFile | None = File(None),
     speak: bool = Form(True),
+    intent: str = Form(""),
+    hint: str = Form(""),
 ):
     session = get_session(session_id)
     trace = Trace()
@@ -136,7 +138,7 @@ async def ask(
     if not transcript:
         return JSONResponse({"error": "I did not catch that. Try again.", "trace": trace.events}, status_code=400)
 
-    result = await orchestrator.handle(session, transcript, language, now, trace)
+    result = await orchestrator.handle(session, transcript, language, now, trace, forced=intent, hint=hint)
 
     audio_b64 = None
     if speak and gnani.enabled:

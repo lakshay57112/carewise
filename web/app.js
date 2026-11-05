@@ -69,6 +69,7 @@ async function boot() {
   const sel = $("lang");
   sel.innerHTML = Object.entries(h.languages).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
   sel.value = "hi-IN";
+  renderChips();
   $("mic-label").textContent = h.voice ? "Tap and speak" : "Voice is off. Type below.";
 }
 
@@ -197,19 +198,52 @@ function renderTimeline(s) {
 }
 
 /* ---------- step 4: ask ---------- */
-const CHIPS = [
-  "Agli dawai kaun si hai?", "Meri report samjhao", "Kya khana chahiye?", "Mujhe bukhar hai",
-  "Maine dawai le li", "Family ko update do", "Insurance claim reject hua",
+// Quick questions in every language. Order matches CHIP_INTENTS. Each chip sends its intent
+// directly, so it works in any language without keyword matching.
+const CHIP_INTENTS = ["next_dose", "explain", "diet", "symptoms", "took_dose", "family", "insurance"];
+const CHIP_HINTS = [
+  "What is my next medicine?", "Explain my summary", "What should I eat?", "I have a fever",
+  "I took my medicine", "Update my family", "My insurance claim was rejected",
 ];
-$("chips").innerHTML = CHIPS.map((c) => `<button class="chip">${esc(c)}</button>`).join("");
-$("chips").querySelectorAll(".chip").forEach((b) => b.addEventListener("click", () => ask({ text: b.textContent })));
+const CHIPS = {
+  "en-IN": ["What is my next medicine?", "Explain my summary", "What should I eat?", "I have a fever",
+    "I took my medicine", "Update my family", "My insurance claim was rejected"],
+  "hi-IN": ["अगली दवा कौन सी है?", "मेरी रिपोर्ट समझाओ", "मुझे क्या खाना चाहिए?", "मुझे बुखार है",
+    "मैंने दवा ले ली", "परिवार को अपडेट दो", "बीमा क्लेम रिजेक्ट हो गया"],
+  "bn-IN": ["আমার পরের ওষুধ কোনটা?", "আমার রিপোর্ট বুঝিয়ে দাও", "আমি কী খাব?", "আমার জ্বর হয়েছে",
+    "আমি ওষুধ খেয়েছি", "পরিবারকে খবর দাও", "আমার বিমার দাবি বাতিল হয়েছে"],
+  "gu-IN": ["મારી આગળની દવા કઈ છે?", "મારો રિપોર્ટ સમજાવો", "મારે શું ખાવું જોઈએ?", "મને તાવ છે",
+    "મેં દવા લઈ લીધી", "પરિવારને અપડેટ આપો", "મારો વીમા દાવો નામંજૂર થયો"],
+  "kn-IN": ["ನನ್ನ ಮುಂದಿನ ಔಷಧಿ ಯಾವುದು?", "ನನ್ನ ವರದಿಯನ್ನು ವಿವರಿಸಿ", "ನಾನು ಏನು ತಿನ್ನಬೇಕು?", "ನನಗೆ ಜ್ವರ ಇದೆ",
+    "ನಾನು ಔಷಧಿ ತೆಗೆದುಕೊಂಡೆ", "ಕುಟುಂಬಕ್ಕೆ ಮಾಹಿತಿ ನೀಡಿ", "ನನ್ನ ವಿಮಾ ಕ್ಲೈಮ್ ತಿರಸ್ಕರಿಸಲಾಗಿದೆ"],
+  "ml-IN": ["എന്റെ അടുത്ത മരുന്ന് ഏതാണ്?", "എന്റെ റിപ്പോർട്ട് വിശദീകരിക്കുക", "ഞാൻ എന്ത് കഴിക്കണം?", "എനിക്ക് പനി ഉണ്ട്",
+    "ഞാൻ മരുന്ന് കഴിച്ചു", "കുടുംബത്തെ അറിയിക്കുക", "എന്റെ ഇൻഷുറൻസ് ക്ലെയിം നിരസിച്ചു"],
+  "mr-IN": ["माझे पुढचे औषध कोणते?", "माझा रिपोर्ट समजावून सांगा", "मी काय खावे?", "मला ताप आहे",
+    "मी औषध घेतले", "कुटुंबाला अपडेट द्या", "माझा विमा दावा नाकारला गेला"],
+  "pa-IN": ["ਮੇਰੀ ਅਗਲੀ ਦਵਾਈ ਕਿਹੜੀ ਹੈ?", "ਮੇਰੀ ਰਿਪੋਰਟ ਸਮਝਾਓ", "ਮੈਨੂੰ ਕੀ ਖਾਣਾ ਚਾਹੀਦਾ ਹੈ?", "ਮੈਨੂੰ ਬੁਖਾਰ ਹੈ",
+    "ਮੈਂ ਦਵਾਈ ਲੈ ਲਈ", "ਪਰਿਵਾਰ ਨੂੰ ਅਪਡੇਟ ਦਿਓ", "ਮੇਰਾ ਬੀਮਾ ਕਲੇਮ ਰੱਦ ਹੋ ਗਿਆ"],
+  "ta-IN": ["எனது அடுத்த மருந்து எது?", "என் அறிக்கையை விளக்குங்கள்", "நான் என்ன சாப்பிட வேண்டும்?", "எனக்கு காய்ச்சல் உள்ளது",
+    "நான் மருந்து எடுத்துக்கொண்டேன்", "குடும்பத்திற்குத் தகவல் கொடுங்கள்", "என் காப்பீட்டு கோரிக்கை நிராகரிக்கப்பட்டது"],
+  "te-IN": ["నా తదుపరి మందు ఏది?", "నా రిపోర్ట్ వివరించండి", "నేను ఏమి తినాలి?", "నాకు జ్వరం ఉంది",
+    "నేను మందు వేసుకున్నాను", "కుటుంబానికి అప్‌డేట్ ఇవ్వండి", "నా బీమా క్లెయిమ్ తిరస్కరించబడింది"],
+};
+function renderChips() {
+  const labels = CHIPS[$("lang").value] || CHIPS["en-IN"];
+  $("chips").innerHTML = labels.map((c, i) => `<button class="chip" data-i="${i}">${esc(c)}</button>`).join("");
+  $("chips").querySelectorAll(".chip").forEach((b) =>
+    b.addEventListener("click", () => {
+      const i = Number(b.dataset.i);
+      ask({ text: b.textContent, intent: CHIP_INTENTS[i], hint: CHIP_HINTS[i] });
+    }));
+}
+$("lang").addEventListener("change", renderChips);
 $("type").addEventListener("submit", (e) => {
   e.preventDefault();
   const q = $("q").value.trim();
   if (q) { $("q").value = ""; ask({ text: q }); }
 });
 
-async function ask({ text = "", audio = null }) {
+async function ask({ text = "", audio = null, intent = "", hint = "" }) {
   if (!state.sid || state.busy) return;
   state.busy = true;
   $("mic").classList.add("busy");
@@ -219,6 +253,7 @@ async function ask({ text = "", audio = null }) {
   fd.append("language", $("lang").value);
   fd.append("now", nowHHMM());
   fd.append("text", text);
+  if (intent) { fd.append("intent", intent); fd.append("hint", hint); }
   if (audio) fd.append("audio", audio, "speech.wav");
   try {
     const res = await fetch("/api/ask", { method: "POST", body: fd });
