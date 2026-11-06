@@ -175,6 +175,10 @@ select { width: auto; padding: 8px 12px; font-size: 14px; border-radius: 999px; 
 .trace-empty::before, .trace-empty::after { display: none !important; }
 .trace-total { text-transform: none; letter-spacing: 0; }
 
+.remind-hint { margin: 0 0 4px; max-width: 56ch; }
+#tg-connect { text-decoration: none; }
+.conf.on { color: var(--fg); }
+
 .foot { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 22px; margin-top: 24px; max-width: 62ch; }
 
 .toast { position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 20px); background: var(--fg); color: var(--bg);
@@ -191,3 +195,14 @@ select { width: auto; padding: 8px 12px; font-size: 14px; border-radius: 999px; 
   .mic { width: 72px; height: 72px; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* reminders: one group per channel */
+.remind-group { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+.remind-group h3 { margin-bottom: 4px; }
+
+/* shown when someone taps a dose notification */
+.due { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px;
+  border: 1px solid var(--fg); border-radius: 14px; padding: 18px 20px; margin-bottom: 28px; scroll-margin-top: 84px; }
+.due .row { margin-top: 0; }
+.due-k { font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.due-text { margin: 6px 0 0; font-size: 17px; font-weight: 500; max-width: 46ch; }

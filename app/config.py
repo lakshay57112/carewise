@@ -30,6 +30,19 @@ TTS_VOICE = os.getenv("GNANI_TTS_VOICE", "Shivani")
 # rule-based reader when this is empty.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+# With a Gemini key, a planner picks which agents to run. Set PLANNER=off to use keyword routing only.
+PLANNER = os.getenv("PLANNER", "on").lower() not in ("off", "0", "false", "no")
+
+# Voice reminders on Telegram (optional). Create a bot with @BotFather and paste its token.
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_API_BASE = os.getenv("TELEGRAM_API_BASE", "https://api.telegram.org")
+TIMEZONE = os.getenv("TZ_NAME", "Asia/Kolkata")  # reminder times are read in this time zone
+DATA_DIR = os.getenv("DATA_DIR", str(ROOT / "data"))
+
+# Phone notifications (web push). Make the pair with: python -m app.vapid
+VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "")
+VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "")
+VAPID_SUBJECT = os.getenv("VAPID_SUBJECT", "mailto:carewise@example.com")
 
 # Optional hand-off to the claim-appeal agent (Insurithm AI)
 INSURITHM_URL = os.getenv("INSURITHM_URL", "")

@@ -7,6 +7,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="/static/icon-192.png">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -25,6 +28,17 @@
 
 <main class="wrap layout">
   <div class="col-main">
+    <section class="due" id="due" hidden>
+      <div>
+        <div class="due-k" id="due-k">Time for your medicine</div>
+        <p class="due-text" id="due-text"></p>
+      </div>
+      <div class="row">
+        <button class="btn primary" id="due-play" hidden>Play</button>
+        <button class="btn ghost" id="due-taken">Taken</button>
+      </div>
+    </section>
+
     <section class="hero" id="hero">
       <h1>Understand your<br>discharge summary.</h1>
       <p class="lead">Paste it or snap a photo. Then just talk, in your own language.</p>
@@ -62,9 +76,34 @@
       <ol class="timeline" id="timeline"></ol>
     </section>
 
+    <section class="block" id="s-remind" hidden>
+      <div class="block-head"><span class="num">04</span><h2>Reminders</h2><span class="conf" id="remind-state"></span></div>
+      <p class="hint remind-hint" id="remind-none" hidden>Reminders are not switched on for this server yet.</p>
+
+      <div class="remind-group" id="push-block" hidden>
+        <h3>Notification on this phone</h3>
+        <p class="hint remind-hint" id="push-hint"></p>
+        <div class="row">
+          <button class="btn primary" id="push-on" hidden>Turn on notifications</button>
+          <button class="btn ghost" id="push-test" hidden>Send a test</button>
+          <button class="btn link" id="push-off" hidden>Turn off on this phone</button>
+        </div>
+      </div>
+
+      <div class="remind-group" id="tg-block">
+        <h3>Voice message on Telegram</h3>
+        <p class="hint remind-hint" id="remind-hint"></p>
+        <div class="row">
+          <a class="btn primary" id="tg-connect" target="_blank" rel="noopener" hidden>Connect Telegram</a>
+          <button class="btn ghost" id="tg-test" hidden>Send a test voice</button>
+          <button class="btn link" id="tg-toggle" hidden>Turn off</button>
+        </div>
+      </div>
+    </section>
+
     <section class="block" id="s-ask" hidden>
       <div class="block-head">
-        <span class="num">04</span><h2>Ask</h2>
+        <span class="num">05</span><h2>Ask</h2>
         <select id="lang" aria-label="Language"></select>
       </div>
       <div class="ask">

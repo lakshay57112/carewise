@@ -1,6 +1,9 @@
 """Carewise API. Run with: uvicorn app.main:app --reload"""
+import asyncio
 import base64
+import secrets
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -8,17 +11,30 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, llm, orchestrator
+from . import config, llm, orchestrator, push, reminders, store, telegram
 from .agents import document, schedule, verifier
 from .gnani import GnaniError, gnani
+from .state import LINK_CODES, SESSIONS
 from .trace import Trace
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 SAMPLE = ROOT / "app" / "samples" / "discharge_sample.txt"
 
-app = FastAPI(title="Carewise")
-SESSIONS: dict[str, dict] = {}  # in memory: fine for a demo, swap for a database later
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    tasks: list[asyncio.Task] = []
+    if telegram.enabled() or push.enabled():  # reminders only run when a channel is set up
+        store.load_into(SESSIONS)
+        tasks = [asyncio.create_task(reminders.scheduler_loop())]
+        if telegram.enabled():
+            tasks.append(asyncio.create_task(reminders.poll_loop()))
+    yield
+    for t in tasks:
+        t.cancel()
+
+
+app = FastAPI(title="Carewise", lifespan=lifespan)
 
 
 def public(sid: str, session: dict) -> dict:
@@ -45,6 +61,8 @@ def get_session(sid: str) -> dict:
 async def health():
     return {
         "voice": gnani.enabled,
+        "telegram": telegram.enabled(),
+        "push": push.enabled(),
         "reader": "model" if llm.enabled() else "basic",
         "languages": config.LANGUAGES,
         "tts_model": config.TTS_MODEL,
@@ -79,7 +97,7 @@ async def read_document(text: str = Form(""), image: UploadFile | None = File(No
 
     sid = uuid.uuid4().hex[:12]
     session = {
-        "data": data, "source": source, "flags": flags, "stats": stats,
+        "sid": sid, "data": data, "source": source, "flags": flags, "stats": stats,
         "pending": [f.id for f in flags], "schedule": sched, "adherence": {}, "alert": "",
     }
     SESSIONS[sid] = session
@@ -109,6 +127,7 @@ class Dose(BaseModel):
 async def log_dose(body: Dose):
     session = get_session(body.session_id)
     session["adherence"][body.slot_key] = body.taken
+    store.save(SESSIONS)
     return {"adherence": session["adherence"]}
 
 
@@ -166,6 +185,211 @@ async def speak(body: Speak):
     except GnaniError as exc:
         raise HTTPException(502, str(exc)) from exc
     return {"audio_b64": base64.b64encode(wav).decode()}
+
+
+@app.get("/api/state")
+async def state(session_id: str):
+    return public(session_id, get_session(session_id))
+
+
+# ---------- voice reminders on Telegram ----------
+
+class LinkReq(BaseModel):
+    session_id: str
+    language: str = "hi-IN"
+
+
+@app.post("/api/telegram/link")
+async def tg_link(body: LinkReq):
+    if not telegram.enabled():
+        raise HTTPException(400, "Voice reminders are not set up on this server yet (TELEGRAM_BOT_TOKEN).")
+    session = get_session(body.session_id)
+    if session["pending"]:
+        raise HTTPException(409, "Confirm the highlighted items first, so reminders use the right times.")
+    code = secrets.token_urlsafe(6)
+    LINK_CODES[code] = body.session_id
+    session.setdefault("telegram", {})["language"] = body.language
+    try:
+        username = await telegram.bot_username()
+    except telegram.TelegramError as exc:
+        raise HTTPException(502, f"Telegram: {exc}") from exc
+    return {"link": f"https://t.me/{username}?start={code}", "bot": username}
+
+
+@app.get("/api/telegram/status")
+async def tg_status(session_id: str):
+    session = get_session(session_id)
+    tg = session.get("telegram") or {}
+    return {
+        "configured": telegram.enabled(),
+        "linked": reminders.is_linked(session),
+        "enabled": bool(tg.get("enabled")),
+        "language": tg.get("language", "hi-IN"),
+        "times": [s["time"] for s in session["schedule"]],
+        "blocked": bool(session["pending"]),
+    }
+
+
+class ToggleReq(BaseModel):
+    session_id: str
+    enabled: bool | None = None
+    language: str | None = None
+
+
+@app.post("/api/telegram/settings")
+async def tg_settings(body: ToggleReq):
+    session = get_session(body.session_id)
+    if not reminders.is_linked(session):
+        raise HTTPException(409, "Connect Telegram first.")
+    tg = session["telegram"]
+    if body.enabled is not None:
+        tg["enabled"] = body.enabled
+    if body.language:
+        tg["language"] = body.language
+    store.save(SESSIONS)
+    return {"enabled": tg["enabled"], "language": tg["language"]}
+
+
+@app.post("/api/telegram/test")
+async def tg_test(body: ToggleReq):
+    session = get_session(body.session_id)
+    if not reminders.is_linked(session):
+        raise HTTPException(409, "Connect Telegram first.")
+    if body.language:
+        session["telegram"]["language"] = body.language
+    now = reminders.now_local().strftime("%H:%M")
+    slot, _ = schedule.next_slot(session["schedule"], now)
+    if not slot:
+        raise HTTPException(409, "There are no medicines to remind about.")
+    try:
+        sent = await reminders.send_reminder(session, slot, test=True, channels=("telegram",))
+    except telegram.TelegramError as exc:
+        raise HTTPException(502, f"Telegram: {exc}") from exc
+    return sent
+
+
+# ---------- notifications on the phone itself (web push) ----------
+
+@app.get("/api/push/config")
+async def push_config():
+    return {"enabled": push.enabled(), "key": config.VAPID_PUBLIC_KEY if push.enabled() else ""}
+
+
+class PushSub(BaseModel):
+    session_id: str
+    subscription: dict
+    language: str = "hi-IN"
+
+
+def _push_state(session: dict) -> dict:
+    p = session.get("push") or {}
+    return {
+        "configured": push.enabled(), "devices": len(p.get("subs", [])), "enabled": bool(p.get("enabled")),
+        "language": p.get("language", "hi-IN"), "times": [s["time"] for s in session["schedule"]],
+        "blocked": bool(session["pending"]),
+    }
+
+
+@app.post("/api/push/subscribe")
+async def push_subscribe(body: PushSub):
+    if not push.enabled():
+        raise HTTPException(400, "Phone notifications are not set up on this server yet (VAPID keys).")
+    session = get_session(body.session_id)
+    if session["pending"]:
+        raise HTTPException(409, "Confirm the highlighted items first, so reminders use the right times.")
+    if not push.valid_subscription(body.subscription):
+        raise HTTPException(400, "That phone did not give a usable notification address.")
+    p = session.setdefault("push", {})
+    subs = [x for x in p.get("subs", []) if x["endpoint"] != body.subscription["endpoint"]]
+    subs.append({"endpoint": body.subscription["endpoint"], "keys": body.subscription["keys"]})
+    p.update(subs=subs, enabled=True, language=body.language)
+    reminders._skip_past(session, reminders.now_local())
+    store.save(SESSIONS)
+    return _push_state(session)
+
+
+class PushRef(BaseModel):
+    session_id: str
+    endpoint: str = ""
+
+
+@app.post("/api/push/status")
+async def push_status(body: PushRef):
+    session = get_session(body.session_id)
+    here = any(x["endpoint"] == body.endpoint for x in (session.get("push") or {}).get("subs", []))
+    return {**_push_state(session), "here": here}
+
+
+@app.post("/api/push/unsubscribe")
+async def push_unsubscribe(body: PushRef):
+    session = get_session(body.session_id)
+    p = session.setdefault("push", {})
+    p["subs"] = [x for x in p.get("subs", []) if body.endpoint and x["endpoint"] != body.endpoint]
+    store.save(SESSIONS)
+    return _push_state(session)
+
+
+class PushSettings(BaseModel):
+    session_id: str
+    language: str
+
+
+@app.post("/api/push/settings")
+async def push_settings(body: PushSettings):
+    session = get_session(body.session_id)
+    if (session.get("push") or {}).get("subs"):
+        session["push"]["language"] = body.language
+        store.save(SESSIONS)
+    return _push_state(session)
+
+
+@app.post("/api/push/test")
+async def push_test(body: PushSettings):
+    session = get_session(body.session_id)
+    if not (session.get("push") or {}).get("subs"):
+        raise HTTPException(409, "Turn on phone notifications first.")
+    session["push"]["language"] = body.language
+    slot, _ = schedule.next_slot(session["schedule"], reminders.now_local().strftime("%H:%M"))
+    if not slot:
+        raise HTTPException(409, "There are no medicines to remind about.")
+    try:
+        return await reminders.send_reminder(session, slot, test=True, channels=("push",))
+    except push.PushError as exc:
+        raise HTTPException(502, f"Notification service: {exc}") from exc
+
+
+class DueReq(BaseModel):
+    session_id: str
+    slot_key: str
+    language: str = "hi-IN"
+
+
+@app.post("/api/reminder/speak")
+async def reminder_speak(body: DueReq):
+    """What the page plays when someone taps a notification: the same words, spoken by Timbre."""
+    session = get_session(body.session_id)
+    slot = next((s for s in session["schedule"] if s["key"] == body.slot_key), None)
+    if not slot:
+        raise HTTPException(404, "That reminder is no longer on your timetable.")
+    text = await reminders.reminder_text(session, slot, body.language)
+    audio = None
+    if gnani.enabled:
+        try:
+            audio = base64.b64encode(await gnani.synthesize(text, body.language)).decode()
+        except GnaniError:
+            pass
+    return {"text": text, "label": slot["label"], "audio_b64": audio, "taken": bool(session["adherence"].get(slot["key"]))}
+
+
+@app.get("/sw.js")
+async def service_worker():
+    # Served from the root so it can handle notifications for the whole site.
+    return FileResponse(WEB / "sw.js", media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/manifest.webmanifest")
+async def manifest():
+    return FileResponse(WEB / "manifest.webmanifest", media_type="application/manifest+json")
 
 
 @app.get("/")

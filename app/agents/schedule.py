@@ -50,3 +50,9 @@ def current_slot(schedule: list[dict], now: str) -> dict | None:
         return None
     due = [s for s in schedule if s["time"] <= now]
     return due[-1] if due else schedule[0]
+
+
+def last_due(schedule: list[dict], now: str) -> dict | None:
+    """The latest slot at or before `now`, or None if no dose has come due yet today."""
+    due = [s for s in schedule if s["time"] <= now]
+    return due[-1] if due else None

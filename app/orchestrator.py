@@ -1,14 +1,18 @@
-"""Orchestrator: works out what the person wants and hands it to the right agent.
+"""Orchestrator: works out what the person wants and hands it to the right agents.
 
-Routing is keyword-based on purpose. It is instant, free and predictable, which matters
-in a voice loop. It understands English, Hinglish (Latin script) and Devanagari.
+Two ways in. With a model key set, the planner (planner.py) reads the request and chooses which
+agents to run and in what order, so "I missed my morning dose, tell my family" becomes two steps.
+Without a key, or if the model fails, routing falls back to keywords: instant, free and
+predictable. Either way the agents do the work and the fixed templates write the reply, so the
+model never writes medical content.
 """
-from . import llm
+from . import config, llm, planner
 from .agents import caregiver, checkin, explainer, handoff, schedule
 from .trace import Trace
 
 KEYWORDS: dict[str, list[str]] = {
     "took_dose": ["le li", "le liya", "kha li", "kha liya", "taken", "i took", "took it", "ले ली", "खा ली", "ले लिया", "खा लिया"],
+    "missed_dose": ["missed", "forgot", "forget", "bhool", "bhul", "chhoot", "छूट", "भूल"],
     "insurance": ["insurance", "claim", "bima", "reject", "cashless", "tpa", "बीमा", "क्लेम"],
     "family": ["family", "ghar wale", "ghar walon", "parivar", "relatives", "परिवार", "घर वालों", "घरवालों"],
     "symptoms": ["fever", "bukhar", "vomit", "ulti", "chest", "seene", "saans", "breath", "swelling", "soojan",
@@ -25,7 +29,7 @@ KEYWORDS: dict[str, list[str]] = {
                 "समझा", "बीमारी", "क्या हुआ"],
 }
 WEAK = {"next_dose": ["goli", "dawai", "dawa", "medicine", "tablet", "गोली", "दवा", "दवाई"]}
-GATED = {"schedule", "next_dose", "took_dose"}
+GATED = {"schedule", "next_dose", "took_dose", "missed_dose"}
 
 
 def classify(text: str) -> str:
@@ -53,43 +57,39 @@ async def classify_llm(text: str) -> tuple[str, str]:
     return (label if label in INTENTS else "unknown"), str(data.get("english", ""))
 
 
-async def handle(session: dict, text: str, lang: str, now: str, trace: Trace,
-                 forced: str = "", hint: str = "") -> dict:
-    english = hint  # an English version of what was said, used for symptom matching
-    with trace.step("orchestrator", "Understanding the request") as s:
-        if forced in INTENTS and forced != "unknown":
-            intent = forced
-            s.detail = f"intent: {intent} (quick question)"
-        else:
-            intent = classify(text)
-            s.detail = f"intent: {intent}"
-            if intent == "unknown" and llm.enabled():
-                try:
-                    intent, english = await classify_llm(text)
-                    s.detail = f"intent: {intent} (read by model)"
-                except Exception:
-                    pass  # stay on 'unknown': it shows the help menu, which is safe
-
+async def _act(intent: str, session: dict, text: str, english: str, now: str, trace: Trace,
+               extra: dict, slot_key: str = "") -> dict:
+    """Runs the agent behind one intent and returns what the explainer needs."""
     data = session["data"]
     sched = session["schedule"]
     ctx: dict = {"data": data, "schedule": sched}
-    extra: dict = {}
+    chosen = next((x for x in sched if x["key"] == slot_key), None)
 
-    if intent in GATED and session["pending"]:
-        trace.note("verifier", "Held back until flagged items are confirmed", f"{len(session['pending'])} pending", "warn")
-        intent = "gated"
-    elif intent == "next_dose":
+    if intent == "next_dose":
         with trace.step("schedule", "Finding the next dose") as s:
             ctx["slot"], ctx["tomorrow"] = schedule.next_slot(sched, now)
             s.detail = f"{ctx['slot']['label']} {ctx['slot']['time']}" if ctx["slot"] else "no schedule"
     elif intent == "took_dose":
         with trace.step("schedule", "Logging the dose as taken") as s:
-            slot = schedule.current_slot(sched, now)
+            slot = chosen or schedule.current_slot(sched, now)
             ctx["slot"] = slot
             if slot:
                 session["adherence"][slot["key"]] = True
                 s.detail = f"{slot['label']} marked taken"
                 extra["adherence"] = session["adherence"]
+    elif intent == "missed_dose":
+        with trace.step("schedule", "Logging the dose as missed") as s:
+            slot = chosen or schedule.last_due(sched, now)
+            ctx["slot"] = slot
+            ctx["next"], ctx["tomorrow"] = schedule.next_slot(sched, now)
+            if slot:
+                session["adherence"][slot["key"]] = False
+                if not session.get("alert"):
+                    session["alert"] = f"{slot['label'].lower()} medicines missed"
+                extra["adherence"] = session["adherence"]
+                s.detail = f"{slot['label']} marked missed"
+            else:
+                s.detail = "no dose was due yet"
     elif intent == "symptoms":
         with trace.step("check-in", "Comparing with the doctor's warning signs") as s:
             ctx["matched"] = checkin.evaluate(f"{text} {english}", data.warning_signs)
@@ -111,12 +111,57 @@ async def handle(session: dict, text: str, lang: str, now: str, trace: Trace,
             ctx["insurance_en"], ctx["insurance_hi"] = handoff.compose(sent)
             extra["handoff"] = body
             s.detail = "sent" if sent else "prepared, not sent (INSURITHM_URL not set)"
+    return ctx
+
+
+async def handle(session: dict, text: str, lang: str, now: str, trace: Trace,
+                 forced: str = "", hint: str = "") -> dict:
+    english = hint  # an English version of what was said, used for symptom matching
+    steps: list[dict] = []  # what to run, in order: [{"intent", "slot"}]
+    planned = False
+    with trace.step("orchestrator", "Understanding the request") as s:
+        if forced in INTENTS and forced != "unknown":
+            steps = [{"intent": forced, "slot": ""}]
+            s.detail = f"intent: {forced} (quick question)"
+        else:
+            if llm.enabled() and config.PLANNER:
+                try:
+                    plan = await planner.make_plan(text, session, now, lang)
+                    steps, english = plan["steps"], plan["english"] or english
+                    planned = True
+                    s.detail = "planned: " + " → ".join(x["intent"] for x in steps)
+                except Exception:
+                    steps = []  # no plan; the keyword router below takes over
+            if not steps:
+                intent = classify(text)
+                s.detail = f"intent: {intent}"
+                if intent == "unknown" and llm.enabled():
+                    try:
+                        intent, english = await classify_llm(text)
+                        s.detail = f"intent: {intent} (read by model)"
+                    except Exception:
+                        pass  # stay on 'unknown': it shows the help menu, which is safe
+                steps = [{"intent": intent, "slot": ""}]
+
+    if planned:
+        for x in steps:
+            trace.note("planner", f"Step: {x['intent']}", x["why"])
+    extra: dict = {}
+    parts: list[tuple[str, str]] = []
+    if any(x["intent"] in GATED for x in steps) and session["pending"]:
+        trace.note("verifier", "Held back until flagged items are confirmed", f"{len(session['pending'])} pending", "warn")
+        steps = [{"intent": "gated", "slot": ""}]
+    for x in steps:
+        ctx = await _act(x["intent"], session, text, english, now, trace, extra, x.get("slot", ""))
+        parts.append(explainer.compose(x["intent"], ctx))
 
     with trace.step("explainer", "Writing the reply in plain words") as s:
-        en, hi = explainer.compose(intent, ctx)
+        en = " ".join(p[0] for p in parts)
+        hi = " ".join(p[1] for p in parts)
         reply, note = await explainer.localize(en, hi, lang)
         s.detail = lang
         if note:
             extra["note"] = note
 
-    return {"intent": intent, "reply": reply, **extra}
+    return {"intent": steps[0]["intent"] if len(steps) == 1 else "+".join(x["intent"] for x in steps),
+            "reply": reply, **extra}

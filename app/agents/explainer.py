@@ -56,6 +56,18 @@ def compose(intent: str, ctx: dict) -> tuple[str, str]:
         slot = ctx["slot"]
         return (f"Noted. I marked the {slot['label'].lower()} medicines as taken.",
                 f"ठीक है। {HI_LABEL.get(slot['label'], slot['label'])} की दवाइयां ली हुई दर्ज कर दीं।")
+    if intent == "missed_dose":
+        slot = ctx["slot"]
+        if not slot:
+            return ("No dose has come due yet today, so nothing is missed.",
+                    "आज अभी तक किसी दवा का समय नहीं हुआ है, इसलिए कुछ छूटा नहीं है।")
+        nxt = ctx.get("next")
+        more_en = f" Your next medicines: {_slot_en(nxt)}." if nxt and not ctx.get("tomorrow") else ""
+        more_hi = f" आपकी अगली दवाइयां: {_slot_hi(nxt)}।" if nxt and not ctx.get("tomorrow") else ""
+        return (f"Noted. I marked your {slot['label'].lower()} medicines as missed. I cannot tell you whether to take "
+                "them late. Please do not double the next dose, and ask your doctor or pharmacist what to do." + more_en,
+                f"ठीक है। {HI_LABEL.get(slot['label'], slot['label'])} की दवाइयां छूटी हुई दर्ज कर दीं। देर से लेनी हैं या नहीं, "
+                "यह मैं नहीं बता सकती। अगली खुराक दोगुनी न लें, और डॉक्टर या दवा-विक्रेता से पूछ लें।" + more_hi)
     if intent == "diet":
         diet = "; ".join(d.diet) or "no diet advice was written"
         act = "; ".join(d.activity)
@@ -83,6 +95,23 @@ def compose(intent: str, ctx: dict) -> tuple[str, str]:
         return ctx["family_en"], ctx["family_hi"]
     if intent == "insurance":
         return ctx["insurance_en"], ctx["insurance_hi"]
+    if intent == "reminder":
+        slot = ctx["slot"]
+        notes_hi = {"before food": "खाने से पहले", "after food": "खाने के बाद"}
+        items_en = ", ".join(" ".join(x for x in (i["medicine"], i["dose"], i["note"]) if x) for i in slot["items"])
+        items_hi = ", ".join(" ".join(x for x in (i["medicine"], i["dose"], notes_hi.get(i["note"], i["note"])) if x)
+                             for i in slot["items"])
+        label = slot["label"].lower()
+        lead_en = "Time to take your medicine before breakfast" if slot["key"] == "pre" else f"Time to take your {label} medicine"
+        en = f"{lead_en}: {items_en}."
+        hi = f"{HI_LABEL.get(slot['label'], slot['label'])} की दवा लेने का समय हो गया है: {items_hi}।"
+        if ctx.get("test"):
+            en, hi = "This is a test reminder. " + en, "यह एक टेस्ट रिमाइंडर है। " + hi
+        return en, hi
+    if intent == "linked":
+        times = ", ".join(ctx["times"])
+        return (f"Connected. I will send you a voice reminder at {times}.",
+                f"जुड़ गया। मैं आपको {times} बजे आवाज़ में याद दिलाऊंगी।")
     if intent == "gated":
         return ("Some items still need your confirmation. Please check the highlighted ones first, so I do not give you a wrong schedule.",
                 "कुछ बातों की आपकी पुष्टि बाकी है। पहले चिह्नित बातें देख लें, ताकि मैं गलत समय-सारणी न बताऊं।")
